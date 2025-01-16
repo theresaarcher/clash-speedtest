@@ -79,7 +79,7 @@ func printResults(results []*speedtester.Result) {
 
 	table.SetHeader([]string{
 		"序号",
-		"节点名称",
+		"节点ID",
 		"类型",
 		"延迟",
 		"抖动",

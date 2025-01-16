@@ -2,12 +2,12 @@ package speedtester
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -63,7 +63,6 @@ func (st *SpeedTester) LoadProxies() (map[string]*CProxy, error) {
 				continue
 			}
 
-			// 设置自定义 User-Agent
 			req.Header.Set("User-Agent", "V2RaySocks Health Checker")
 
 			resp, err := client.Do(req)
@@ -71,7 +70,7 @@ func (st *SpeedTester) LoadProxies() (map[string]*CProxy, error) {
 				log.Warnln("failed to fetch config: %s", err)
 				continue
 			}
-			defer resp.Body.Close() // 确保关闭响应体
+			defer resp.Body.Close()
 
 			body, err = io.ReadAll(resp.Body)
 			if err != nil {
@@ -147,8 +146,18 @@ func (st *SpeedTester) LoadProxies() (map[string]*CProxy, error) {
 }
 
 func (st *SpeedTester) TestProxies(proxies map[string]*CProxy, fn func(result *Result)) {
+	failedProxyNames := []string{}
+
 	for name, proxy := range proxies {
-		fn(st.testProxy(name, proxy))
+		result := st.testProxy(name, proxy)
+		fn(result)
+		if result.PacketLoss == 100 {
+			failedProxyNames = append(failedProxyNames, name)
+		}
+	}
+
+	if len(failedProxyNames) > 0 {
+		st.reportFailedProxies(failedProxyNames)
 	}
 }
 
@@ -187,34 +196,41 @@ func (st *SpeedTester) testProxy(name string, proxy *CProxy) *Result {
 		ProxyConfig: proxy.Config,
 	}
 
-	// 1. 首先进行延迟测试
 	latencyResult := st.testLatency(proxy)
 	result.Latency = latencyResult.avgLatency
 	result.Jitter = latencyResult.jitter
 	result.PacketLoss = latencyResult.packetLoss
 
-	// 如果延迟测试完全失败，直接返回
 	if result.PacketLoss == 100 {
 		result.Report = 1
-		// 构建带参数的报告 URL
-		queryParams := url.Values{}
-		queryParams.Add("name", name)
-		queryParams.Add("type", proxy.Type().String())
-		queryParams.Add("addr", proxy.Addr())
-
-		reportURL := fmt.Sprintf("%s&%s", st.config.ReportURL, queryParams.Encode())
-		resp, err := http.Get(reportURL)
-		if err != nil {
-			fmt.Printf("Failed to report error for node: %s, error: %v\n", name, err)
-		} else {
-			defer resp.Body.Close()
-		}
-		return result
 	} else {
 		result.Report = 0
 	}
 
 	return result
+}
+
+func (st *SpeedTester) reportFailedProxies(failedProxies []string) {
+	payload := failedProxies
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Warnln("failed to marshal failed proxies data: %s", err)
+		return
+	}
+
+	req, err := http.NewRequest("POST", st.config.ReportURL, strings.NewReader(string(data)))
+	if err != nil {
+		log.Warnln("failed to create report request: %s", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Warnln("failed to report failed proxies: %s", err)
+	} else {
+		defer resp.Body.Close()
+	}
 }
 
 type latencyResult struct {
@@ -279,14 +295,12 @@ func calculateLatencyStats(latencies []time.Duration, failedPings int) *latencyR
 		return result
 	}
 
-	// 计算平均延迟
 	var total time.Duration
 	for _, l := range latencies {
 		total += l
 	}
 	result.avgLatency = total / time.Duration(len(latencies))
 
-	// 计算抖动
 	var variance float64
 	for _, l := range latencies {
 		diff := float64(l - result.avgLatency)
