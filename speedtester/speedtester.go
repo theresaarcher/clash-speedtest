@@ -124,7 +124,7 @@ func (st *SpeedTester) LoadProxies() (map[string]*CProxy, error) {
 		for k, p := range proxies {
 			switch p.Type() {
 			case constant.Shadowsocks, constant.ShadowsocksR, constant.Snell, constant.Socks5, constant.Http,
-				constant.Vmess, constant.Vless, constant.Trojan, constant.Hysteria, constant.Hysteria2,
+				constant.Vmess, constant.Vless, constant.Trojan, constant.Hysteria, constant.Hysteria2, constant.AnyTLS,
 				constant.WireGuard, constant.Tuic, constant.Ssh:
 			default:
 				continue
